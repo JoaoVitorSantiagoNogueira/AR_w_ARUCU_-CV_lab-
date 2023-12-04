@@ -1,6 +1,7 @@
 import moderngl
 import os
 import moderngl_window as mglw
+import numpy as np
 
 ## https://github.com/moderngl/moderngl/tree/main/examples
 class Example(mglw.WindowConfig):
@@ -23,12 +24,40 @@ class EmptyWindow(Example):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def render(self, time: float, frame_time: float):
-        self.ctx.clear(
-            (math.sin(time) + 1.0) / 2,
-            (math.sin(time + 2) + 1.0) / 2,
-            (math.sin(time + 3) + 1.0) / 2,
+        v =  open("vshader.glsl", "r")
+        v_shader = v.read()
+        v.close()
+
+        f =  open("fshader.glsl", "r")
+        f_shader = f.read()
+        f.close()
+
+        self.prog = self.ctx.program(vertex_shader= v_shader, fragment_shader=f_shader)
+
+
+         # Point coordinates are put followed by the vec3 color values
+        vertices = np.array([
+            # x, y, red, green, blue
+            0.0, 0.8, 1.0, 0.0, 0.0,
+            -0.6, -0.8, 0.0, 1.0, 0.0,
+            0.6, -0.8, 0.0, 0.0, 1.0,
+        ], dtype='f4')
+
+        self.vbo = self.ctx.buffer(vertices)
+
+        # We control the 'in_vert' and `in_color' variables
+        self.vao = self.ctx.vertex_array(
+            self.prog,
+            [
+                # Map in_vert to the first 2 floats
+                # Map in_color to the next 3 floats
+                self.vbo.bind('in_vert', 'in_color', layout='2f 3f'),
+            ],
         )
+
+    def render(self, time: float, frame_time: float):
+        self.ctx.clear(0, 0, 0)
+        self.vao.render()
 
     def resize(self, width: int, heigh: int):
         """
