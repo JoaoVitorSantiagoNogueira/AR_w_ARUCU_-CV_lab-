@@ -2,6 +2,8 @@ import moderngl
 import os
 import moderngl_window as mglw
 import numpy as np
+from pyrr import Matrix44
+
 
 ## https://github.com/moderngl/moderngl/tree/main/examples
 class Example(mglw.WindowConfig):
@@ -11,141 +13,98 @@ class Example(mglw.WindowConfig):
     aspect_ratio = 16 / 9
     resizable = True
 
-import math
-import random
 
-class EmptyWindow(Example):
+
+class LoadingOBJ(Example):
+    title = "Loading OBJ"
     gl_version = (3, 3)
-    title = "Empty Window"
-    window_size = (1280, 720)
-    aspect_ratio = 16 / 9
-    resizable = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        v =  open("vshader.glsl", "r")
-        v_shader = v.read()
-        v.close()
+        self.obj = self.load_scene('D:\Files\FACUL\m2o\Lab Visão\AR_w_ARUCU_-CV_lab-\data\sitting_dummy.obj')
+        self.texture = self.load_texture_2d('D:\Files\FACUL\m2o\Lab Visão\AR_w_ARUCU_-CV_lab-\data\wood.jpg')
 
-        f =  open("fshader.glsl", "r")
-        f_shader = f.read()
-        f.close()
+        self.prog = self.ctx.program(
+            vertex_shader='''
+                #version 330
 
-        self.prog = self.ctx.program(vertex_shader= v_shader, fragment_shader=f_shader)
+                uniform mat4 Mvp;
 
+                in vec3 in_position;
+                in vec3 in_normal;
+                in vec2 in_texcoord_0;
 
-         # Point coordinates are put followed by the vec3 color values
-        vertices = np.array([
-            # x, y, red, green, blue
-            0.0, 0.8, 1.0, 0.0, 0.0,
-            -0.6, -0.8, 0.0, 1.0, 0.0,
-            0.6, -0.8, 0.0, 0.0, 1.0,
-        ], dtype='f4')
+                out vec3 v_vert;
+                out vec3 v_norm;
+                out vec2 v_text;
 
-        self.vbo = self.ctx.buffer(vertices)
+                void main() {
+                    v_vert = in_position;
+                    v_norm = in_normal;
+                    v_text = in_texcoord_0;
+                    gl_Position = Mvp * vec4(in_position, 1.0);
+                }
+            ''',
+            fragment_shader='''
+                #version 330
 
-        # We control the 'in_vert' and `in_color' variables
-        self.vao = self.ctx.vertex_array(
-            self.prog,
-            [
-                # Map in_vert to the first 2 floats
-                # Map in_color to the next 3 floats
-                self.vbo.bind('in_vert', 'in_color', layout='2f 3f'),
-            ],
+                uniform sampler2D Texture;
+                uniform vec4 Color;
+                uniform vec3 Light;
+
+                in vec3 v_vert;
+                in vec3 v_norm;
+                in vec2 v_text;
+
+                out vec4 f_color;
+
+                void main() {
+                    float lum = dot(normalize(v_norm), normalize(v_vert - Light));
+                    lum = acos(lum) / 3.14159265;
+                    lum = clamp(lum, 0.0, 1.0);
+                    lum = lum * lum;
+                    lum = smoothstep(0.0, 1.0, lum);
+                    lum *= smoothstep(0.0, 80.0, v_vert.z) * 0.3 + 0.7;
+                    lum = lum * 0.8 + 0.2;
+
+                    vec3 color = texture(Texture, v_text).rgb;
+                    color = color * (1.0 - Color.a) + Color.rgb * Color.a;
+                    f_color = vec4(color * lum, 1.0);
+                }
+            ''',
         )
 
-    def render(self, time: float, frame_time: float):
-        self.ctx.clear(0, 0, 0)
+        self.light = self.prog['Light']
+        self.color = self.prog['Color']
+        self.mvp = self.prog['Mvp']
+
+        # Create a vao from the first root node (attribs are auto mapped)
+        self.vao = self.obj.root_nodes[0].mesh.vao.instance(self.prog)
+
+    def render(self, time, frame_time):
+        self.ctx.clear(1.0, 1.0, 1.0)
+        self.ctx.enable(moderngl.DEPTH_TEST)
+
+        proj = Matrix44.perspective_projection(45.0, self.aspect_ratio, 0.1, 1000.0)
+        lookat = Matrix44.look_at(
+            (-85, -180, 140),
+            (0.0, 0.0, 65.0),
+            (0.0, 0.0, 1.0),
+        )
+
+
+        pos   = Matrix44.from_translation((100,0,0)) 
+        scale = Matrix44.from_scale((1,1,1)) 
+        model = scale*pos
+
+        self.light.value = (-140.0, -300.0, 350.0)
+        self.color.value = (1.0, 1.0, 1.0, 0.25)
+        self.mvp.write((proj * lookat*model).astype('f4'))
+
+        self.texture.use()
         self.vao.render()
-
-    def resize(self, width: int, heigh: int):
-        """
-        Pick window resizes in case we need yo update
-        internal states when this happens.
-        """
-        print("Window resized to", width, heigh)
-
-    def iconify(self, iconify: bool):
-        """Window hide/minimize and restore"""
-        print("Window was iconified:", iconify)
-
-    def key_event(self, key, action, modifiers):
-        keys = self.wnd.keys
-
-        # Key presses
-        if action == keys.ACTION_PRESS:
-            if key == keys.SPACE:
-                print("SPACE key was pressed")
-
-            # Using modifiers (shift and ctrl)
-
-            if key == keys.Z and modifiers.shift:
-                print("Shift + Z was pressed")
-
-            if key == keys.Z and modifiers.ctrl:
-                print("ctrl + Z was pressed")
-
-        # Key releases
-        elif action == self.wnd.keys.ACTION_RELEASE:
-            if key == keys.SPACE:
-                print("SPACE key was released")
-
-        if action == keys.ACTION_PRESS:
-            # Move the window around with AWSD
-            if key == keys.A:
-                self.wnd.position = self.wnd.position[0] - 20, self.wnd.position[1]
-            if key == keys.D:
-                self.wnd.position = self.wnd.position[0] + 20, self.wnd.position[1]
-            if key == keys.W:
-                self.wnd.position = self.wnd.position[0], self.wnd.position[1] - 20
-            if key == keys.S:
-                self.wnd.position = self.wnd.position[0], self.wnd.position[1] + 20
-
-            # Resize window around with Shift + AWSD
-            if self.wnd.modifiers.shift and key == keys.A:
-                self.wnd.size = self.wnd.size[0] - 50, self.wnd.size[1]
-            if self.wnd.modifiers.shift and key == keys.D:
-                self.wnd.size = self.wnd.size[0] + 50, self.wnd.size[1]
-            if self.wnd.modifiers.shift and key == keys.W:
-                self.wnd.size = self.wnd.size[0], self.wnd.size[1] - 50
-            if self.wnd.modifiers.shift and key == keys.S:
-                self.wnd.size = self.wnd.size[0], self.wnd.size[1] + 50
-
-            # toggle cursor
-            if key == keys.C:
-                self.wnd.cursor = not self.wnd.cursor
-
-            # Shuffle window title
-            if key == keys.T:
-                title = list(self.wnd.title)
-                random.shuffle(title)
-                self.wnd.title = ''.join(title)
-
-            # Toggle mouse exclusivity
-            if key == keys.M:
-                self.wnd.mouse_exclusivity = not self.wnd.mouse_exclusivity
-
-    def mouse_position_event(self, x, y, dx, dy):
-        print("Mouse position pos={} {} delta={} {}".format(x, y, dx, dy))
-
-    def mouse_drag_event(self, x, y, dx, dy):
-        print("Mouse drag pos={} {} delta={} {}".format(x, y, dx, dy))
-
-    def mouse_scroll_event(self, x_offset, y_offet):
-        print("mouse_scroll_event", x_offset, y_offet)
-
-    def mouse_press_event(self, x, y, button):
-        print("Mouse button {} pressed at {}, {}".format(button, x, y))
-        print("Mouse states:", self.wnd.mouse_states)
-
-    def mouse_release_event(self, x: int, y: int, button: int):
-        print("Mouse button {} released at {}, {}".format(button, x, y))
-        print("Mouse states:", self.wnd.mouse_states)
-
-    def unicode_char_entered(self, char):
-        print("unicode_char_entered:", char)
 
 
 if __name__ == '__main__':
-    EmptyWindow.run()
+    LoadingOBJ.run()
